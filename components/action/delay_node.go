@@ -214,11 +214,8 @@ func (x *DelayNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 			ctx.TellFailure(msg, fmt.Errorf("msg not found"))
 		}
 
-	} else if oldMsgId := x.LastPendingMsgId.Load().(string); oldMsgId != "" {
-		//如果是覆盖模式，替换队列里的消息
-		x.mu.Lock()
-		defer x.mu.Unlock()
-		x.PendingMsgs[oldMsgId] = msg
+	} else if oldMsgId := x.LastPendingMsgId.Load().(string); oldMsgId != "" && x.replacePendingMsg(oldMsgId, msg) {
+		//如果是覆盖模式，已替换队列里的消息
 	} else {
 		//获取队列长度
 		x.mu.Lock()
@@ -262,6 +259,23 @@ func (x *DelayNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 		}
 	}
 
+}
+
+// replacePendingMsg 覆盖模式下，用新消息替换队列里 oldMsgId 对应的挂起消息，替换成功返回 true。
+// 读取 LastPendingMsgId 到获取锁之间，定时器可能已经投递并删除了该消息。这时不能再写入：
+// 没有对应的定时器，写入的消息永远不会被投递，并且会一直占用 maxPendingMsgs 的名额。
+// 返回 false 时，调用方把它当作新消息，开始新的延迟周期。
+// replacePendingMsg replaces the pending message oldMsgId with msg in overwrite mode and reports
+// whether it did. The delay timer may have delivered oldMsgId between reading LastPendingMsgId and
+// taking the lock; writing to it then would store a message that no timer will ever deliver.
+func (x *DelayNode) replacePendingMsg(oldMsgId string, msg types.RuleMsg) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if _, ok := x.PendingMsgs[oldMsgId]; !ok {
+		return false
+	}
+	x.PendingMsgs[oldMsgId] = msg
+	return true
 }
 
 // Destroy 销毁
