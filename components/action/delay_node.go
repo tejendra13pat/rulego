@@ -122,8 +122,10 @@ func (x *DelayNode) Init(ruleConfig types.Config, configuration types.Configurat
 	}
 	x.LastPendingMsgId.Store("")
 
-	// 初始化延迟时间解析
-	// Initialize delay time parsing
+	// 初始化延迟时间解析，先清除上一次初始化的结果
+	// Initialize delay time parsing, clearing the result of any previous Init
+	x.delayMsValue = 0
+	x.delayMsTemplate = nil
 	x.Config.DelayMs = strings.TrimSpace(x.Config.DelayMs)
 	if x.Config.DelayMs != "" {
 		// 尝试直接解析为数值
@@ -147,8 +149,9 @@ func (x *DelayNode) Init(ruleConfig types.Config, configuration types.Configurat
 func (x *DelayNode) getDelayMilliseconds(ctx types.RuleContext, msg types.RuleMsg) (int64, error) {
 	// 优先使用新的DelayMs参数
 	if x.Config.DelayMs != "" {
-		// 如果有预解析的数值，直接返回
-		if x.delayMsValue > 0 {
+		// 没有模板说明是纯数字，直接返回预解析的值。0 或负数表示不延迟，由 OnMsg 立即放行，
+		// 与模板解析出 0 的行为一致
+		if x.delayMsTemplate == nil {
 			return x.delayMsValue, nil
 		}
 		// 如果有模板，使用模板解析
